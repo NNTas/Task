@@ -5,8 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
-import { createSupabaseClient } from '@/lib/supabase/client';  // ← これ追加
-import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 type Todo = {
   id: string;
@@ -74,15 +72,6 @@ export default function Home() {
   // カレンダー用
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  // Supabase ユーザー状態
-  const [user, setUser] = useState<any>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
-
-  // Supabaseクライアント（関数で遅延呼び出し）
-  const supabase = createSupabaseClient();
-
   // タブタイトル
   useEffect(() => {
     if (taskIsRunning || freeIsRunning) {
@@ -95,7 +84,7 @@ export default function Home() {
     }
   }, [taskRemaining, freeRemaining, taskIsRunning, freeIsRunning]);
 
-  // localStorage（一時的に残す）
+  // localStorage
   useEffect(() => {
     const saved = localStorage.getItem("todos");
     if (saved) {
@@ -118,25 +107,6 @@ export default function Home() {
     localStorage.setItem("normalSort", normalSort);
     checkOverdue(todos);
   }, [todos, clockSize, clockOpacity, normalSort]);
-
-  // Supabaseログイン状態チェック
-  useEffect(() => {
-    const getUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-    };
-    getUser();
-
-const { data: authListener } = supabase.auth.onAuthStateChange(
-  (event: AuthChangeEvent, session: Session | null) => {
-    setUser(session?.user ?? null);
-  }
-);
-
-    return () => {
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
 
   const checkOverdue = (todosList: Todo[]) => {
     const now = new Date();
@@ -400,39 +370,6 @@ const { data: authListener } = supabase.auth.onAuthStateChange(
     setTaskIsRunning(true);
   };
 
-  // ログイン関数
-  const handleLogin = async () => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    if (error) {
-      alert("ログイン失敗: " + error.message);
-    } else {
-      setIsLoginOpen(false);
-      alert("ログイン成功！");
-    }
-  };
-
-  // サインアップ関数
-  const handleSignUp = async () => {
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-    });
-    if (error) {
-      alert("登録失敗: " + error.message);
-    } else {
-      alert("登録完了！メールを確認してログインしてください");
-    }
-  };
-
-  // ログアウト
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    alert("ログアウトしました");
-  };
-
   return (
     <>
       {(sidebarOpen || showClockMenu || showTaskInputPanel || deleteConfirmTodo || overdueAlert.length > 0) && (
@@ -489,51 +426,6 @@ const { data: authListener } = supabase.auth.onAuthStateChange(
             <button onClick={() => { setActiveTab("calendar"); setSidebarOpen(false); }} className={`w-full text-left text-xl py-4 px-6 rounded-xl transition-all ${activeTab === "calendar" ? "bg-blue-500 text-white shadow-lg" : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"}`}>
               カレンダー
             </button>
-
-            {/* ログインメニュー */}
-            <div className="mt-8 border-t pt-6">
-              {user ? (
-                <div className="text-center">
-                  <p className="text-lg font-medium mb-4">ようこそ、{user.email}</p>
-                  <Button onClick={handleLogout} variant="destructive" className="w-full">
-                    ログアウト
-                  </Button>
-                </div>
-              ) : (
-                <div>
-                  <Button onClick={() => setIsLoginOpen(!isLoginOpen)} className="w-full text-xl py-6">
-                    {isLoginOpen ? "閉じる" : "ログイン / 登録"}
-                  </Button>
-
-                  {isLoginOpen && (
-                    <div className="mt-6 space-y-4">
-                      <Input
-                        type="email"
-                        placeholder="メールアドレス"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        className="text-lg"
-                      />
-                      <Input
-                        type="password"
-                        placeholder="パスワード"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        className="text-lg"
-                      />
-                      <div className="flex gap-4">
-                        <Button onClick={handleLogin} className="flex-1">
-                          ログイン
-                        </Button>
-                        <Button onClick={handleSignUp} variant="outline" className="flex-1">
-                          新規登録
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
           </div>
         </div>
       </div>
