@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from '@supabase/supabase-js';
+import { createSupabaseClient } from '@/lib/supabase/client';
 import type { Session } from '@supabase/supabase-js';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,7 +26,8 @@ const getSupabase = () => {
 // Supabaseクライアント（ここを自分の値に置き換えて！）
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = getSupabase();
+const supabase = createSupabaseClient();
+
 
 type Todo = {
   id: string;
