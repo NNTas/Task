@@ -8,10 +8,24 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
 
+// トップレベルで呼ばない！関数として遅延実行
+const getSupabase = () => {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!url || !key) {
+    console.error('Supabase env vars missing!');
+    throw new Error('Supabase URL or Key is missing');
+  }
+
+  return createClient(url, key);
+};
+
+
 // Supabaseクライアント（ここを自分の値に置き換えて！）
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = getSupabase();
 
 type Todo = {
   id: string;
