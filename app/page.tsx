@@ -1,33 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from '@supabase/supabase-js';
-import { createSupabaseClient } from '@/lib/supabase/client';
-import type { Session } from '@supabase/supabase-js';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
-
-// トップレベルで呼ばない！関数として遅延実行
-const getSupabase = () => {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!url || !key) {
-    console.error('Supabase env vars missing!');
-    throw new Error('Supabase URL or Key is missing');
-  }
-
-  return createClient(url, key);
-};
-
-
-// Supabaseクライアント（ここを自分の値に置き換えて！）
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createSupabaseClient();
-
+import { createSupabaseClient } from '@/lib/supabase/client';  // ← これ追加
+import type { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 type Todo = {
   id: string;
@@ -101,6 +80,9 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [isLoginOpen, setIsLoginOpen] = useState(false);
 
+  // Supabaseクライアント（関数で遅延呼び出し）
+  const supabase = createSupabaseClient();
+
   // タブタイトル
   useEffect(() => {
     if (taskIsRunning || freeIsRunning) {
@@ -113,7 +95,7 @@ export default function Home() {
     }
   }, [taskRemaining, freeRemaining, taskIsRunning, freeIsRunning]);
 
-  // localStorage（Supabase導入前の一時保存）
+  // localStorage（一時的に残す）
   useEffect(() => {
     const saved = localStorage.getItem("todos");
     if (saved) {
@@ -145,9 +127,11 @@ export default function Home() {
     };
     getUser();
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
-      setUser(session?.user ?? null);
-    });
+const { data: authListener } = supabase.auth.onAuthStateChange(
+  (event: AuthChangeEvent, session: Session | null) => {
+    setUser(session?.user ?? null);
+  }
+);
 
     return () => {
       authListener.subscription.unsubscribe();
