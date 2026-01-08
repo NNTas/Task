@@ -1,10 +1,17 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { createClient } from '@supabase/supabase-js';
+import type { Session } from '@supabase/supabase-js';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card } from "@/components/ui/card";
+
+// Supabaseクライアント（ここを自分の値に置き換えて！）
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 type Todo = {
   id: string;
@@ -14,9 +21,21 @@ type Todo = {
   lastResetDate?: string;
   dueDate?: string;
   timerMinutes?: number;
-  timerSeconds?: number; // 新規追加：秒単位対応
+  timerSeconds?: number;
   color?: "red" | "orange" | "yellow" | "green" | "blue" | "indigo" | "purple";
 };
+
+type SortType = "added" | "color" | "due" | "custom";
+
+const colorOrder: ("red" | "orange" | "yellow" | "green" | "blue" | "indigo" | "purple")[] = [
+  "red",
+  "orange",
+  "yellow",
+  "green",
+  "blue",
+  "indigo",
+  "purple",
+];
 
 export default function Home() {
   const [todos, setTodos] = useState<Todo[]>([]);
@@ -25,7 +44,7 @@ export default function Home() {
   const [dueDate, setDueDate] = useState("");
   const [timerPreset, setTimerPreset] = useState("none");
   const [customMinutes, setCustomMinutes] = useState("25");
-  const [customSeconds, setCustomSeconds] = useState("00"); // 秒入力
+  const [customSeconds, setCustomSeconds] = useState("00");
   const [taskColor, setTaskColor] = useState<"red" | "orange" | "yellow" | "green" | "blue" | "indigo" | "purple">("blue");
 
   // フリータイマー
@@ -49,13 +68,24 @@ export default function Home() {
   const [showTaskInputPanel, setShowTaskInputPanel] = useState(false);
   const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>("");
 
-  // 削除確認
+  // 警告・削除
   const [deleteConfirmTodo, setDeleteConfirmTodo] = useState<Todo | null>(null);
+  const [overdueAlert, setOverdueAlert] = useState<Todo[]>([]);
+  const [urgentTodoIds, setUrgentTodoIds] = useState<string[]>([]);
+
+  // ソート
+  const [normalSort, setNormalSort] = useState<SortType>("due");
 
   // カレンダー用
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
-  // タブタイトルに残り時間表示（PiP代替）
+  // Supabase ユーザー状態
+  const [user, setUser] = useState<any>(null);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [isLoginOpen, setIsLoginOpen] = useState(false);
+
+  // タブタイトル
   useEffect(() => {
     if (taskIsRunning || freeIsRunning) {
       const totalSeconds = taskIsRunning ? taskRemaining : freeRemaining;
@@ -67,23 +97,56 @@ export default function Home() {
     }
   }, [taskRemaining, freeRemaining, taskIsRunning, freeIsRunning]);
 
-  // localStorage
+  // localStorage（Supabase導入前の一時保存）
   useEffect(() => {
     const saved = localStorage.getItem("todos");
-    if (saved) setTodos(JSON.parse(saved));
+    if (saved) {
+      const loaded = JSON.parse(saved);
+      setTodos(loaded);
+      checkOverdue(loaded);
+    }
     const savedClockSize = localStorage.getItem("clockSize");
     if (savedClockSize) setClockSize(savedClockSize as any);
     const savedClockOpacity = localStorage.getItem("clockOpacity");
     if (savedClockOpacity) setClockOpacity(Number(savedClockOpacity));
+    const savedNormalSort = localStorage.getItem("normalSort");
+    if (savedNormalSort) setNormalSort(savedNormalSort as SortType);
   }, []);
 
   useEffect(() => {
     localStorage.setItem("todos", JSON.stringify(todos));
     localStorage.setItem("clockSize", clockSize);
     localStorage.setItem("clockOpacity", clockOpacity.toString());
-  }, [todos, clockSize, clockOpacity]);
+    localStorage.setItem("normalSort", normalSort);
+    checkOverdue(todos);
+  }, [todos, clockSize, clockOpacity, normalSort]);
 
-  // タブ切り替え時にパネル閉じる
+  // Supabaseログイン状態チェック
+  useEffect(() => {
+    const getUser = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      setUser(session?.user ?? null);
+    };
+    getUser();
+
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session: Session | null) => {
+      setUser(session?.user ?? null);
+    });
+
+    return () => {
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  const checkOverdue = (todosList: Todo[]) => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const overdue = todosList.filter(t => !t.isDaily && !t.completed && t.dueDate && new Date(t.dueDate) < now);
+    if (overdue.length > 0) {
+      setOverdueAlert(overdue);
+    }
+  };
+
   useEffect(() => {
     if (activeTab === "tasks") {
       setShowTaskInputPanel(false);
@@ -117,11 +180,13 @@ export default function Home() {
     if (!input.trim()) return;
 
     let totalSeconds = 0;
-    if (timerPreset === "10") totalSeconds = 10 * 60;
-    else if (timerPreset === "25") totalSeconds = 25 * 60;
-    else if (timerPreset === "30") totalSeconds = 30 * 60;
-    else if (timerPreset === "custom") {
-      totalSeconds = (parseInt(customMinutes) || 0) * 60 + (parseInt(customSeconds) || 0);
+    if (isDaily) {
+      if (timerPreset === "10") totalSeconds = 10 * 60;
+      else if (timerPreset === "25") totalSeconds = 25 * 60;
+      else if (timerPreset === "30") totalSeconds = 30 * 60;
+      else if (timerPreset === "custom") {
+        totalSeconds = (parseInt(customMinutes) || 0) * 60 + (parseInt(customSeconds) || 0);
+      }
     }
 
     const newTodo: Todo = {
@@ -131,8 +196,8 @@ export default function Home() {
       isDaily,
       dueDate: !isDaily && dueDate ? dueDate : undefined,
       lastResetDate: isDaily ? new Date().toISOString().split('T')[0] : undefined,
-      timerMinutes: Math.floor(totalSeconds / 60),
-      timerSeconds: totalSeconds % 60,
+      timerMinutes: isDaily ? Math.floor(totalSeconds / 60) : undefined,
+      timerSeconds: isDaily ? totalSeconds % 60 || 0 : undefined,
       color: taskColor,
     };
 
@@ -156,17 +221,16 @@ export default function Home() {
     setDeleteConfirmTodo(null);
   };
 
-  const toggleTodo = (id: string) => {
-    setTodos(todos.map(t => (t.id === id ? { ...t, completed: !t.completed } : t)));
-    if (activeTodoId === id) resetTaskTimer();
+  const markOverdueAsDone = () => {
+    overdueAlert.forEach(t => {
+      setTodos(prev => prev.filter(p => p.id !== t.id));
+    });
+    setOverdueAlert([]);
   };
 
-  const startTodoTimer = (todo: Todo) => {
-    const total = (todo.timerMinutes || 0) * 60 + (todo.timerSeconds || 0);
-    if (total === 0) return;
-    setActiveTodoId(todo.id);
-    setTaskRemaining(total);
-    setTaskIsRunning(true);
+  const markAsUrgent = () => {
+    setUrgentTodoIds(overdueAlert.map(t => t.id));
+    setOverdueAlert([]);
   };
 
   const resetTaskTimer = () => {
@@ -208,7 +272,6 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [taskIsRunning, taskRemaining, activeTodoId]);
 
-  // フリータイマー処理
   useEffect(() => {
     if (!freeIsRunning || freeRemaining <= 0) return;
     const interval = setInterval(() => {
@@ -225,8 +288,8 @@ export default function Home() {
   }, [freeIsRunning, freeRemaining, freeIsPomodoro]);
 
   const startFreeTimer = () => {
-    const mins = parseInt(freeMinutesInput) || 0;
-    const secs = parseInt(freeSecondsInput) || 0;
+    const mins = freeIsPomodoro ? 25 : (parseInt(freeMinutesInput) || 0);
+    const secs = freeIsPomodoro ? 0 : (parseInt(freeSecondsInput) || 0);
     const total = mins * 60 + secs;
     if (total > 0) {
       setFreeRemaining(total);
@@ -288,10 +351,92 @@ export default function Home() {
     setDeleteConfirmTodo(null);
   };
 
+  const getDueDateColor = (dueDateStr: string | undefined) => {
+    if (!dueDateStr) return "text-gray-800";
+    const due = new Date(dueDateStr);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    due.setHours(0, 0, 0, 0);
+    const delta = Math.floor((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (delta < 0) return "text-purple-600 font-bold";
+    if (delta <= 3) return "text-red-600 font-bold";
+    if (delta <= 7) return "text-orange-600 font-bold";
+    return "text-gray-800";
+  };
+
+  const formatJapaneseDate = (dateStr: string) => {
+    const d = new Date(dateStr);
+    return `${d.getMonth() + 1}月${d.getDate()}日`;
+  };
+
+  const sortTodos = (todosList: Todo[], type: SortType) => {
+    const list = [...todosList];
+    if (type === "added") {
+      return list.reverse();
+    } else if (type === "color") {
+      return list.sort((a, b) => {
+        const aIndex = a.color ? colorOrder.indexOf(a.color) : -1;
+        const bIndex = b.color ? colorOrder.indexOf(b.color) : -1;
+        return aIndex - bIndex;
+      });
+    } else if (type === "due") {
+      return list.sort((a, b) => {
+        if (!a.dueDate) return 1;
+        if (!b.dueDate) return -1;
+        return new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime();
+      });
+    }
+    return list.reverse(); // customは追加順逆
+  };
+
+  const normalTodos = sortTodos(todos.filter(t => !t.isDaily), normalSort);
+  const dailyTodos = todos.filter(t => t.isDaily);
+
+  const startTodoTimer = (todo: Todo) => {
+    const total = (todo.timerMinutes || 0) * 60 + (todo.timerSeconds || 0);
+    if (total === 0) return;
+    setActiveTodoId(todo.id);
+    setTaskRemaining(total);
+    setTaskIsRunning(true);
+  };
+
+  // ログイン関数
+  const handleLogin = async () => {
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+    if (error) {
+      alert("ログイン失敗: " + error.message);
+    } else {
+      setIsLoginOpen(false);
+      alert("ログイン成功！");
+    }
+  };
+
+  // サインアップ関数
+  const handleSignUp = async () => {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+    });
+    if (error) {
+      alert("登録失敗: " + error.message);
+    } else {
+      alert("登録完了！メールを確認してログインしてください");
+    }
+  };
+
+  // ログアウト
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    alert("ログアウトしました");
+  };
+
   return (
     <>
-      {(sidebarOpen || showClockMenu || showTaskInputPanel || deleteConfirmTodo) && (
-        <div className="fixed inset-0 bg-black/30 z-20" onClick={closeAllPanels} />
+      {(sidebarOpen || showClockMenu || showTaskInputPanel || deleteConfirmTodo || overdueAlert.length > 0) && (
+        <div className="fixed inset-0 bg-black/50 z-20" onClick={closeAllPanels} />
       )}
 
       <button onClick={() => setSidebarOpen(!sidebarOpen)} className="fixed top-5 left-5 text-4xl z-50 bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded-xl p-4 shadow-2xl hover:shadow-xl transition-all">
@@ -344,6 +489,51 @@ export default function Home() {
             <button onClick={() => { setActiveTab("calendar"); setSidebarOpen(false); }} className={`w-full text-left text-xl py-4 px-6 rounded-xl transition-all ${activeTab === "calendar" ? "bg-blue-500 text-white shadow-lg" : "bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-600"}`}>
               カレンダー
             </button>
+
+            {/* ログインメニュー */}
+            <div className="mt-8 border-t pt-6">
+              {user ? (
+                <div className="text-center">
+                  <p className="text-lg font-medium mb-4">ようこそ、{user.email}</p>
+                  <Button onClick={handleLogout} variant="destructive" className="w-full">
+                    ログアウト
+                  </Button>
+                </div>
+              ) : (
+                <div>
+                  <Button onClick={() => setIsLoginOpen(!isLoginOpen)} className="w-full text-xl py-6">
+                    {isLoginOpen ? "閉じる" : "ログイン / 登録"}
+                  </Button>
+
+                  {isLoginOpen && (
+                    <div className="mt-6 space-y-4">
+                      <Input
+                        type="email"
+                        placeholder="メールアドレス"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        className="text-lg"
+                      />
+                      <Input
+                        type="password"
+                        placeholder="パスワード"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="text-lg"
+                      />
+                      <div className="flex gap-4">
+                        <Button onClick={handleLogin} className="flex-1">
+                          ログイン
+                        </Button>
+                        <Button onClick={handleSignUp} variant="outline" className="flex-1">
+                          新規登録
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -400,7 +590,7 @@ export default function Home() {
               <div className="flex flex-col gap-6">
                 <Input value={input} onChange={e => setInput(e.target.value)} placeholder="新しいタスクを入力..." onKeyDown={e => e.key === "Enter" && addTodo()} className="text-xl h-14" />
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-end">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-end">
                   <div className="flex items-center gap-4">
                     <label className="text-lg font-medium">種類：</label>
                     <select value={isDaily ? "daily" : "normal"} onChange={e => setIsDaily(e.target.value === "daily")} className="px-5 py-3 border rounded-xl text-lg bg-gray-50 dark:bg-gray-700">
@@ -429,23 +619,25 @@ export default function Home() {
                     </select>
                   </div>
 
-                  <div className="flex items-center gap-4">
-                    <label className="text-lg font-medium">タイマー：</label>
-                    <select value={timerPreset} onChange={e => setTimerPreset(e.target.value)} className="px-5 py-3 border rounded-xl text-lg bg-gray-50 dark:bg-gray-700">
-                      <option value="none">なし</option>
-                      <option value="10">10分</option>
-                      <option value="25">25分</option>
-                      <option value="30">30分</option>
-                      <option value="custom">カスタム</option>
-                    </select>
-                    {timerPreset === "custom" && (
-                      <div className="flex items-center gap-2">
-                        <Input type="number" value={customMinutes} onChange={e => setCustomMinutes(e.target.value)} placeholder="分" className="w-20 text-center" />
-                        <span className="text-xl">:</span>
-                        <Input type="number" value={customSeconds} onChange={e => setCustomSeconds(e.target.value)} placeholder="秒" className="w-20 text-center" min="0" max="59" />
-                      </div>
-                    )}
-                  </div>
+                  {isDaily && (
+                    <div className="flex items-center gap-4">
+                      <label className="text-lg font-medium">タイマー：</label>
+                      <select value={timerPreset} onChange={e => setTimerPreset(e.target.value)} className="px-5 py-3 border rounded-xl text-lg bg-gray-50 dark:bg-gray-700">
+                        <option value="none">なし</option>
+                        <option value="10">10分</option>
+                        <option value="25">25分</option>
+                        <option value="30">30分</option>
+                        <option value="custom">カスタム</option>
+                      </select>
+                      {timerPreset === "custom" && (
+                        <div className="flex items-center gap-2">
+                          <Input type="number" value={customMinutes} onChange={e => setCustomMinutes(e.target.value)} placeholder="分" className="w-20 text-center" />
+                          <span className="text-xl">:</span>
+                          <Input type="number" value={customSeconds} onChange={e => setCustomSeconds(e.target.value)} placeholder="秒" className="w-20 text-center" min="0" max="59" />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   <Button onClick={addTodo} size="lg" className="text-xl py-7">
                     タスク追加
@@ -457,7 +649,9 @@ export default function Home() {
             {taskIsRunning && activeTodoId && (
               <Card className="p-10 mb-12 bg-gradient-to-r from-green-400 to-blue-500 text-white shadow-2xl">
                 <div className="text-center">
-                  <p className="text-2xl font-medium mb-6">集中中：{todos.find(t => t.id === activeTodoId)?.text}</p>
+                  <p className="text-2xl font-medium mb-6">
+                    タスク「{todos.find(t => t.id === activeTodoId)?.text}」作業中
+                  </p>
                   <p className="text-8xl font-bold font-mono mb-8">{formatTime(taskRemaining)}</p>
                   <Button onClick={resetTaskTimer} variant="destructive" size="lg" className="text-xl">
                     中止する
@@ -468,22 +662,49 @@ export default function Home() {
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-16">
               <div>
-                <h2 className="text-3xl font-bold mb-8 text-gray-800 dark:text-white">通常タスク</h2>
+                <div className="flex items-center justify-between mb-8">
+                  <h2 className="text-3xl font-bold text-gray-800 dark:text-white">通常タスク</h2>
+                  <select value={normalSort} onChange={e => setNormalSort(e.target.value as SortType)} className="px-4 py-2 border rounded-lg bg-gray-50 dark:bg-gray-700">
+                    <option value="added">追加順</option>
+                    <option value="color">色順</option>
+                    <option value="due">期限順</option>
+                    <option value="custom">カスタム（現在無効）</option>
+                  </select>
+                </div>
                 <div className="space-y-6">
-                  {todos.filter(t => !t.isDaily).map(todo => (
-                    <TaskCard key={todo.id} todo={todo} isActive={activeTodoId === todo.id} onStart={startTodoTimer} onToggle={toggleTodo} onDelete={requestDelete} />
+                  {normalTodos.map(todo => (
+                    <TaskCard
+                      key={todo.id}
+                      todo={todo}
+                      isActive={activeTodoId === todo.id}
+                      onStart={startTodoTimer}
+                      onToggle={() => {}}
+                      onDelete={requestDelete}
+                      urgentTodoIds={urgentTodoIds}
+                    />
                   ))}
-                  {todos.filter(t => !t.isDaily).length === 0 && <Card className="p-12 text-center text-gray-500">通常タスクはありません</Card>}
+                  {normalTodos.length === 0 && <Card className="p-12 text-center text-gray-500">通常タスクはありません</Card>}
                 </div>
               </div>
 
               <div>
                 <h2 className="text-3xl font-bold mb-8 text-gray-800 dark:text-white">デイリータスク</h2>
                 <div className="space-y-6">
-                  {todos.filter(t => t.isDaily).map(todo => (
-                    <TaskCard key={todo.id} todo={todo} isActive={activeTodoId === todo.id} onStart={startTodoTimer} onToggle={toggleTodo} onDelete={requestDelete} />
+                  {dailyTodos.map(todo => (
+                    <TaskCard
+                      key={todo.id}
+                      todo={todo}
+                      isActive={activeTodoId === todo.id}
+                      onStart={startTodoTimer}
+                      onToggle={(checked) => {
+                        setTodos(todos.map(t => t.id === todo.id ? { ...t, completed: checked as boolean } : t));
+                        if (activeTodoId === todo.id) resetTaskTimer();
+                      }}
+                      onDelete={requestDelete}
+                      urgentTodoIds={urgentTodoIds}
+                    />
                   ))}
-                  {todos.filter(t => t.isDaily).length === 0 && <Card className="p-12 text-center text-gray-500">デイリータスクはありません</Card>}
+                  {dailyTodos.length === 0 && <Card className="p-12 text-center text-gray-500">デイリータスクはありません</Card>}
                 </div>
               </div>
             </div>
@@ -500,7 +721,7 @@ export default function Home() {
                   type="number"
                   placeholder="分"
                   className="w-24 text-center text-black"
-                  disabled={freeIsPomodoro}
+                  disabled={freeIsPomodoro || freeIsRunning}
                 />
                 <span className="text-4xl">:</span>
                 <Input
@@ -511,42 +732,153 @@ export default function Home() {
                   className="w-24 text-center text-black"
                   min="0"
                   max="59"
-                  disabled={freeIsPomodoro}
+                  disabled={freeIsPomodoro || freeIsRunning}
                 />
               </div>
 
               <div className="flex justify-center gap-6 flex-wrap">
-                <Button onClick={startFreeTimer} size="lg" className="text-2xl px-10 py-8">
-                  スタート
-                </Button>
+                {!freeIsRunning && (
+                  <Button onClick={startFreeTimer} size="lg" className="text-2xl px-10 py-8">
+                    スタート
+                  </Button>
+                )}
                 <Button onClick={() => setFreeIsRunning(!freeIsRunning)} size="lg" variant="secondary" className="text-2xl px-10 py-8 text-black">
                   {freeIsRunning ? "ポーズ" : "再開"}
                 </Button>
-                <Button onClick={() => { setFreeIsRunning(false); setFreeRemaining(freeIsPomodoro ? 25*60 : 0); }} size="lg" variant="outline" className="text-2xl px-10 py-8 text-white border-white">
+                <Button onClick={() => { setFreeIsRunning(false); setFreeRemaining(freeIsPomodoro ? 25*60 : 0); }} size="lg" variant="outline" className="text-2xl px-10 py-8 text-black border-2 border-white">
                   リセット
                 </Button>
-                <Button onClick={() => setFreeIsPomodoro(!freeIsPomodoro)} size="lg" variant="outline" className="text-2xl px-10 py-8 text-white border-white">
-                  {freeIsPomodoro ? "通常モード" : "ポモドーロ"}
-                </Button>
+                {!freeIsRunning && (
+                  <Button onClick={() => setFreeIsPomodoro(!freeIsPomodoro)} size="lg" variant="outline" className="text-2xl px-10 py-8 text-black border-2 border-white">
+                    {freeIsPomodoro ? "通常モード" : "ポモドーロ"}
+                  </Button>
+                )}
               </div>
             </Card>
           </main>
         )}
       </div>
 
-      {/* 右側パネル・削除モーダルは前回と同じ */}
-      {/* （省略せずすべて含めてあるので安心してコピーしてね！） */}
+      <div className={`fixed right-0 top-0 h-full w-96 bg-white dark:bg-gray-800 shadow-2xl z-30 transition-transform duration-500 ${showTaskInputPanel ? "translate-x-0" : "translate-x-full"}`}>
+        <div className="p-10 flex flex-col h-full">
+          <h2 className="text-3xl font-bold mb-8">タスク追加 ({selectedCalendarDate})</h2>
+
+          <div className="mb-8 flex-1 overflow-y-auto">
+            <p className="text-lg font-medium mb-4">この日のタスク</p>
+            {todos.filter(t => !t.isDaily && t.dueDate === selectedCalendarDate).length === 0 ? (
+              <p className="text-gray-500">まだタスクはありません</p>
+            ) : (
+              <div className="space-y-4">
+                {todos.filter(t => !t.isDaily && t.dueDate === selectedCalendarDate).map(todo => (
+                  <TaskCard
+                    key={todo.id}
+                    todo={todo}
+                    isActive={false}
+                    onStart={() => {}}
+                    onToggle={() => {}}
+                    onDelete={requestDelete}
+                    urgentTodoIds={urgentTodoIds}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="border-t pt-8">
+            <Input value={input} onChange={e => setInput(e.target.value)} placeholder="新しいタスクを入力" className="text-xl h-14 mb-6" autoFocus />
+
+            <div className="mb-6">
+              <label className="text-lg font-medium block mb-3">色を選択：</label>
+              <select value={taskColor} onChange={e => setTaskColor(e.target.value as any)} className="w-full px-5 py-3 border rounded-xl text-lg bg-gray-50 dark:bg-gray-700">
+                <option value="red">赤</option>
+                <option value="orange">橙</option>
+                <option value="yellow">黄</option>
+                <option value="green">緑</option>
+                <option value="blue">青</option>
+                <option value="indigo">藍</option>
+                <option value="purple">紫</option>
+              </select>
+            </div>
+
+            <Button onClick={addTodo} size="lg" className="w-full text-xl py-8 mb-4">
+              この日に追加
+            </Button>
+
+            <Button onClick={() => setShowTaskInputPanel(false)} variant="outline" size="lg" className="w-full text-xl py-6">
+              閉じる
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {deleteConfirmTodo && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-10 max-w-md mx-4">
+            <h3 className="text-2xl font-bold mb-6 text-center">
+              {deleteConfirmTodo.isDaily
+                ? `デイリータスク「${deleteConfirmTodo.text}」を消去します。本当にいいのかな？かな？？`
+                : `通常タスク「${deleteConfirmTodo.text}」を消去します。本当に終わったかな？かな？？`}
+            </h3>
+            <div className="flex gap-4 justify-center">
+              <Button onClick={confirmDelete} variant="destructive" size="lg">
+                はい、削除する
+              </Button>
+              <Button onClick={() => setDeleteConfirmTodo(null)} variant="outline" size="lg">
+                キャンセル
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {overdueAlert.length > 0 && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl p-10 max-w-lg mx-4 max-h-screen overflow-y-auto">
+            <h3 className="text-3xl font-bold mb-8 text-center text-red-600">期限超過警告</h3>
+            <div className="space-y-6 mb-8">
+              {overdueAlert.map(todo => (
+                <div key={todo.id} className="p-6 bg-red-100 dark:bg-red-900 rounded-xl">
+                  <p className="text-2xl font-medium text-center">
+                    タスク「{todo.text}」が期限を超過しています
+                  </p>
+                  <p className="text-xl text-center mt-3">
+                    (期限 {formatJapaneseDate(todo.dueDate!)})
+                  </p>
+                  <p className="text-xl text-center mt-4 font-bold">
+                    ちゃんと終わってるかな？かな？？
+                  </p>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-6 justify-center">
+              <Button onClick={markAsUrgent} variant="destructive" size="lg" className="text-2xl px-10 py-6">
+                ヤバい！！
+              </Button>
+              <Button onClick={markOverdueAsDone} size="lg" className="text-2xl px-10 py-6">
+                終わった！
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
 
-// TaskCardはそのまま
-function TaskCard({ todo, isActive, onStart, onToggle, onDelete }: {
+function TaskCard({
+  todo,
+  isActive,
+  onStart,
+  onToggle,
+  onDelete,
+  urgentTodoIds,
+}: {
   todo: Todo;
   isActive: boolean;
   onStart: (todo: Todo) => void;
-  onToggle: (id: string) => void;
+  onToggle: (checked: boolean) => void;
   onDelete: (todo: Todo) => void;
+  urgentTodoIds: string[];
 }) {
   const colorClasses = {
     red: "border-l-8 border-red-500",
@@ -560,30 +892,52 @@ function TaskCard({ todo, isActive, onStart, onToggle, onDelete }: {
 
   const cardColorClass = todo.color ? colorClasses[todo.color] : "";
 
+  const dueColorClass = getDueDateColor(todo.dueDate);
+
+  const isUrgent = urgentTodoIds.includes(todo.id);
+
   return (
-    <Card className={`p-8 transition-all ${isActive ? "ring-4 ring-blue-500 shadow-2xl scale-105" : "shadow-lg hover:shadow-xl"} ${cardColorClass}`}>
-      <div className="flex items-center gap-6 flex-wrap">
-        <Checkbox checked={todo.completed} onCheckedChange={() => onToggle(todo.id)} className="h-8 w-8" />
-        <div className="flex-1">
-          <span className={`text-2xl ${todo.completed ? "line-through text-gray-500" : "text-gray-800 dark:text-white"}`}>
-            {todo.text}
-          </span>
-          {todo.dueDate && <span className="block text-lg text-orange-600 mt-2">期限: {todo.dueDate}</span>}
-          {(todo.timerMinutes || todo.timerSeconds) && (
-            <span className="block text-lg text-green-600">
-              タイマー: {todo.timerMinutes || 0}分 {todo.timerSeconds || 0}秒
+    <div className="relative">
+      <Card
+        className={`p-8 transition-all ${isActive ? "ring-4 ring-blue-500 shadow-2xl scale-105" : "shadow-lg hover:shadow-xl"} ${cardColorClass}`}
+      >
+        <div className="flex items-center gap-6 flex-wrap">
+          {isUrgent && <span className="text-6xl text-red-600 font-bold animate-pulse">！</span>}
+          {todo.isDaily && <Checkbox checked={todo.completed} onCheckedChange={onToggle} className="h-8 w-8" />}
+          <div className="flex-1">
+            <span className={`text-2xl ${todo.completed ? "line-through text-gray-500" : "text-gray-800 dark:text-white"}`}>
+              {todo.text}
             </span>
+            {todo.dueDate && <span className={`block text-lg mt-2 ${dueColorClass}`}>期限: {todo.dueDate}</span>}
+            {todo.isDaily && (todo.timerMinutes !== undefined || todo.timerSeconds !== undefined) && (
+              <span className="block text-lg text-green-600">
+                タイマー: {todo.timerMinutes || 0}分 {todo.timerSeconds || 0}秒
+              </span>
+            )}
+          </div>
+          {todo.isDaily && !todo.completed && (todo.timerMinutes !== undefined || todo.timerSeconds !== undefined) && (
+            <Button size="lg" variant={isActive ? "secondary" : "default"} onClick={() => onStart(todo)} className="text-xl px-8">
+              {isActive ? "実行中" : "開始"}
+            </Button>
           )}
-        </div>
-        {!todo.completed && (todo.timerMinutes || todo.timerSeconds) && (
-          <Button size="lg" variant={isActive ? "secondary" : "default"} onClick={() => onStart(todo)} className="text-xl px-8">
-            {isActive ? "実行中" : "開始"}
+          <Button variant="ghost" size="icon" onClick={() => onDelete(todo)} className="text-2xl">
+            ×
           </Button>
-        )}
-        <Button variant="ghost" size="icon" onClick={() => onDelete(todo)} className="text-2xl">
-          ×
-        </Button>
-      </div>
-    </Card>
+        </div>
+      </Card>
+    </div>
   );
+}
+
+function getDueDateColor(dueDateStr: string | undefined): string {
+  if (!dueDateStr) return "text-gray-800";
+  const due = new Date(dueDateStr);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  due.setHours(0, 0, 0, 0);
+  const delta = Math.floor((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+  if (delta < 0) return "text-purple-600 font-bold";
+  if (delta <= 3) return "text-red-600 font-bold";
+  if (delta <= 7) return "text-orange-600 font-bold";
+  return "text-gray-800";
 }
