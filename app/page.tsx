@@ -72,6 +72,30 @@ export default function Home() {
   // カレンダー用
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
+  // useStateの下あたりに追加
+const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+const [showInstallButton, setShowInstallButton] = useState(false);
+
+useEffect(() => {
+  const handleBeforeInstallPrompt = (e: any) => {
+    // デフォルトのポップアップをキャンセル（自分で制御したい場合）
+    e.preventDefault();
+    setDeferredPrompt(e);
+    setShowInstallButton(true); // ボタンを表示
+  };
+
+  window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+  // すでにインストール済みかチェック（任意）
+  if (window.matchMedia('(display-mode: standalone)').matches) {
+    setShowInstallButton(false); // すでにインストール済みなら非表示
+  }
+
+  return () => {
+    window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  };
+}, []);
+
   // タブタイトル
   useEffect(() => {
     if (taskIsRunning || freeIsRunning) {
@@ -685,7 +709,23 @@ export default function Home() {
                     onDelete={requestDelete}
                     urgentTodoIds={urgentTodoIds}
                   />
+                  
                 ))}
+                {showInstallButton && (
+  <Button
+    onClick={async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt(); // インストールプロンプトを表示
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log(`User response to the install prompt: ${outcome}`);
+      setDeferredPrompt(null);
+      setShowInstallButton(false);
+    }}
+    className="w-full text-xl py-6 bg-green-600 hover:bg-green-700 text-white"
+  >
+    アプリをインストール
+  </Button>
+)}
               </div>
             )}
           </div>
