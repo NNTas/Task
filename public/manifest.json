@@ -3,24 +3,16 @@
   "name": "俺の究極Todoアプリ",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "icon-192.png", 
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-512.png",
+      "src": "icon-512.png",
       "type": "image/png",
       "sizes": "512x512",
       "purpose": "any maskable"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "/screenshot-wide.png",
-      "type": "image/png",
-      "sizes": "1280x800",
-      "form_factor": "wide"
     }
   ],
   "start_url": "/",
