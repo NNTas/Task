@@ -1,0 +1,42 @@
+name: Godot 4.4.1 bootstrap
+
+on:
+  push:
+    branches:
+      - automation/godot441-bootstrap
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official Godot 4.4.1
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 --retry-delay 2 \
+            -o Godot_v4.4.1-stable_linux.x86_64.zip \
+            https://github.com/godotengine/godot-builds/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
+          sha256sum Godot_v4.4.1-stable_linux.x86_64.zip > godot441.sha256
+
+      - name: Verify executable
+        shell: bash
+        run: |
+          set -euo pipefail
+          unzip -q Godot_v4.4.1-stable_linux.x86_64.zip -d godot441
+          chmod +x godot441/Godot_v4.4.1-stable_linux.x86_64
+          godot441/Godot_v4.4.1-stable_linux.x86_64 --version | tee godot441.version.txt
+          grep -F '4.4.1.stable' godot441.version.txt
+
+      - name: Upload verified Godot archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: godot-4.4.1-linux-x86_64
+          path: |
+            Godot_v4.4.1-stable_linux.x86_64.zip
+            godot441.sha256
+            godot441.version.txt
+          if-no-files-found: error
+          retention-days: 1
