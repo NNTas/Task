@@ -19,6 +19,7 @@ jobs:
           curl -fL --retry 3 --retry-delay 2 \
             -o Godot_v4.4.1-stable_linux.x86_64.zip \
             https://github.com/godotengine/godot-builds/releases/download/4.4.1-stable/Godot_v4.4.1-stable_linux.x86_64.zip
+          echo 'd6e382fb531019f85630c1f485a561a0d20c4a2344b6c3847735cfee7da812aa  Godot_v4.4.1-stable_linux.x86_64.zip' | sha256sum -c -
           sha256sum Godot_v4.4.1-stable_linux.x86_64.zip > godot441.sha256
 
       - name: Verify executable
@@ -28,7 +29,7 @@ jobs:
           unzip -q Godot_v4.4.1-stable_linux.x86_64.zip -d godot441
           chmod +x godot441/Godot_v4.4.1-stable_linux.x86_64
           godot441/Godot_v4.4.1-stable_linux.x86_64 --version | tee godot441.version.txt
-          grep -F '4.4.1.stable' godot441.version.txt
+          grep -F '4.4.1.stable.official.49a5bc7b6' godot441.version.txt
 
       - name: Upload verified Godot archive
         uses: actions/upload-artifact@v4
@@ -39,4 +40,4 @@ jobs:
             godot441.sha256
             godot441.version.txt
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 7
